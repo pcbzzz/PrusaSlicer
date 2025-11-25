@@ -3614,6 +3614,16 @@ void PrintConfigDef::init_fff_params()
     def->mode = comAdvanced;
     def->set_default_value(new ConfigOptionPercent(15));
 
+    def = this->add("support_tree_base_layers", coInt);
+    def->label = L("Branch Base Layers");
+    def->category = L("Support material");
+    // TRN PrintSettings: "Organic supports" > "Support Base Layers"
+    def->tooltip = L("Number of base layers to generate for Organic supports. Increasing this can make the support base sturdier and easier to remove.");
+    def->min = 1;
+    def->max = 10;
+    def->mode = comAdvanced;
+    def->set_default_value(new ConfigOptionInt(1));
+
     def = this->add("temperature", coInts);
     def->label = L("Other layers");
     def->tooltip = L("Nozzle temperature for layers after the first one. Set this to zero to disable "

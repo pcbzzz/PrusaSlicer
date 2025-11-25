@@ -1399,6 +1399,18 @@ void organic_draw_branches(
                 }
         }
 
+    if (int base_layers = std::clamp(config.support_tree_base_layers, 1, 10);
+        base_layers > 1 && ! slices.empty()) {
+        Polygons base_polygons = slices[0].num_branches > 1 ? union_(slices[0].polygons) : slices[0].polygons;
+        if (! base_polygons.empty()) {
+            size_t limit = std::min(size_t(base_layers), slices.size());
+            for (size_t i = 1; i < limit; ++i) {
+                append(slices[i].polygons, base_polygons);
+                slices[i].num_branches++; 
+            }
+        }
+    }
+
     tbb::parallel_for(tbb::blocked_range<size_t>(0, std::min(move_bounds.size(), slices.size()), 1),
         [&print_object, &config, &slices, &bottom_contacts, &top_contacts, &intermediate_layers, &layer_storage, &throw_on_cancel](const tbb::blocked_range<size_t> &range) {
         for (size_t layer_idx = range.begin(); layer_idx < range.end(); ++layer_idx) {

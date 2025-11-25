@@ -220,6 +220,8 @@ struct TreeSupportMeshGroupSettings {
     // The diameter of the top of the tip of the branches of tree support.
     // minimum: min_wall_line_width, minimum warning: min_wall_line_width+0.05, maximum_value: support_tree_branch_diameter, value: support_line_width
     coord_t                         support_tree_tip_diameter               { scaled<coord_t>(0.4) };
+    // Number of base layers to generate for Organic supports.
+    int                             support_tree_base_layers                { 1 };
 
     // Support Interface Priority
     // How support interface and support will interact when they overlap. Currently only implemented for support roof.
@@ -355,6 +357,10 @@ public:
      * \brief Amount of walls the support area will have.
      */
     int support_wall_count;
+    /*
+     * \brief Number of base layers to generate for Organic supports.
+     */
+    int support_tree_base_layers;
     /*
      * \brief Maximum allowed deviation when simplifying.
      */

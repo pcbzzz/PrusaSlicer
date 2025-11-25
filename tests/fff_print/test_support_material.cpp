@@ -1,4 +1,5 @@
 #include <catch2/catch_test_macros.hpp>
+#include <algorithm>
 
 #include "libslic3r/GCodeReader.hpp"
 #include "libslic3r/Layer.hpp"
@@ -495,3 +496,139 @@ Old Perl tests, which were disabled by Vojtech at the time of first Support Gene
 }
 
 */
+#include <catch2/catch_test_macros.hpp>
+
+#include "libslic3r/GCodeReader.hpp"
+#include "libslic3r/Layer.hpp"
+#include "libslic3r/Print.hpp"
+#include "libslic3r/PrintConfig.hpp"
+
+#include "test_data.hpp"
+
+using namespace Slic3r;
+using namespace Slic3r::Test;
+
+static size_t count_no_sort_layers(SpanOfConstPtrs<SupportLayer> support_layers)
+{
+    return std::count_if(support_layers.begin(), support_layers.end(),
+        [](const SupportLayer *layer) {
+            return std::any_of(layer->support_fills.entities.begin(), layer->support_fills.entities.end(),
+                [](const ExtrusionEntity *entity) {
+                    if (auto collection = dynamic_cast<const ExtrusionEntityCollection*>(entity))
+                        return collection->no_sort;
+                    return false;
+                });
+        });
+}
+
+TEST_CASE("Organic Support: Base Layers", "[OrganicSupport]")
+{
+    TriangleMesh mesh = Slic3r::Test::mesh(Slic3r::Test::TestMesh::cube_20x20x20);
+    mesh.translate(0, 0, 10); // Lift it up by 10mm.
+    
+    Slic3r::Model model;
+    ModelObject *object = model.add_object();
+    object->name = "floating_cube.stl";
+    object->add_volume(mesh);
+    object->add_instance(); // Default instance at 0,0,0
+
+    Slic3r::Print print;
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({
+        { "support_material", 1 },
+        { "support_material_style", "organic" },
+        { "support_tree_base_layers", 5 },
+        { "layer_height", 0.2 },
+        { "first_layer_height", 0.2 },
+        { "support_material_threshold", 0 }
+    });
+    
+    print.apply(model, config);
+    print.validate();
+    print.process();
+
+    auto print_object = print.objects().front();
+    const auto& support_layers = print_object->support_layers();
+    
+    REQUIRE(support_layers.size() > 5);
+    
+    double area0 = 0;
+    for (const ExPolygon& expoly : support_layers[0]->support_islands) area0 += expoly.area();
+    
+    REQUIRE(area0 > 0);
+    
+    for (size_t i = 1; i < 5; ++i) {
+        double areai = 0;
+        for (const ExPolygon& expoly : support_layers[i]->support_islands) areai += expoly.area();
+        
+        REQUIRE(areai >= area0 - 1.0);
+    }
+
+    REQUIRE(count_no_sort_layers(support_layers) == size_t(std::clamp(5, 1, 10)));
+}
+
+TEST_CASE("Organic Support: Negative base layers clamp to at least one", "[OrganicSupport]")
+{
+    TriangleMesh mesh = Slic3r::Test::mesh(Slic3r::Test::TestMesh::cube_20x20x20);
+    mesh.translate(0, 0, 10);
+
+    Slic3r::Model model;
+    ModelObject *object = model.add_object();
+    object->name = "floating_cube.stl";
+    object->add_volume(mesh);
+    object->add_instance();
+
+    Slic3r::Print print;
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({
+        { "support_material", 1 },
+        { "support_material_style", "organic" },
+        { "support_tree_base_layers", -1 }, // Misconfigured input should clamp to minimum.
+        { "layer_height", 0.2 },
+        { "first_layer_height", 0.2 },
+        { "support_material_threshold", 0 }
+    });
+
+    print.apply(model, config);
+    print.validate();
+    print.process();
+
+    const auto &support_layers = print.objects().front()->support_layers();
+    REQUIRE_FALSE(support_layers.empty());
+    REQUIRE(std::any_of(support_layers.begin(), support_layers.end(),
+        [](const SupportLayer *layer) { return !layer->support_fills.empty(); }));
+
+    REQUIRE(count_no_sort_layers(support_layers) == size_t(1));
+}
+
+TEST_CASE("Organic Support: Excessive base layers clamp to max", "[OrganicSupport]")
+{
+    TriangleMesh mesh = Slic3r::Test::mesh(Slic3r::Test::TestMesh::cube_20x20x20);
+    mesh.translate(0, 0, 10);
+
+    Slic3r::Model model;
+    ModelObject *object = model.add_object();
+    object->name = "floating_cube.stl";
+    object->add_volume(mesh);
+    object->add_instance();
+
+    Slic3r::Print print;
+    DynamicPrintConfig config = DynamicPrintConfig::full_print_config();
+    config.set_deserialize_strict({
+        { "support_material", 1 },
+        { "support_material_style", "organic" },
+        { "support_tree_base_layers", 60 },
+        { "layer_height", 0.2 },
+        { "first_layer_height", 0.2 },
+        { "support_material_threshold", 0 }
+    });
+
+    print.apply(model, config);
+    print.validate();
+    print.process();
+
+    const auto &support_layers = print.objects().front()->support_layers();
+    REQUIRE_FALSE(support_layers.empty());
+
+    REQUIRE(count_no_sort_layers(support_layers) == size_t(10));
+}

@@ -86,6 +86,7 @@ TreeSupportMeshGroupSettings::TreeSupportMeshGroupSettings(const PrintObject &pr
     this->support_tree_top_rate       = config.support_tree_top_rate.value; // percent
 //    this->support_tree_tip_diameter = this->support_line_width;
     this->support_tree_tip_diameter = std::clamp(scaled<coord_t>(config.support_tree_tip_diameter.value), 0, this->support_tree_branch_diameter);
+    this->support_tree_base_layers = std::clamp(config.support_tree_base_layers.value, 1, 10);
 }
 
 TreeSupportSettings::TreeSupportSettings(const TreeSupportMeshGroupSettings &mesh_group_settings, const SlicingParameters &slicing_params)
@@ -119,6 +120,7 @@ TreeSupportSettings::TreeSupportSettings(const TreeSupportMeshGroupSettings &mes
       support_line_spacing(mesh_group_settings.support_line_spacing),
       support_bottom_offset(mesh_group_settings.support_bottom_offset),
       support_wall_count(mesh_group_settings.support_wall_count),
+      support_tree_base_layers(mesh_group_settings.support_tree_base_layers),
       resolution(mesh_group_settings.resolution),
       support_roof_line_distance(mesh_group_settings.support_roof_line_distance), // in the end the actual infill has to be calculated to subtract interface from support areas according to interface_preference.
       settings(mesh_group_settings),

@@ -7,6 +7,7 @@
 #include <oneapi/tbb/parallel_for.h>
 #include <boost/log/trivial.hpp>
 #include <cmath>
+#include <algorithm>
 #include <initializer_list>
 #include <limits>
 #include <memory>
@@ -458,24 +459,45 @@ SupportGeneratorLayersPtr generate_raft_base(
             new_layer.contact_polygons = std::make_unique<Polygons>(columns);
         }
     } else {
-        if (columns_base != nullptr) {
-            // Expand the bases of the support columns in the 1st layer.
-            Polygons &raft     = columns_base->polygons;
-            Polygons  trimming = offset(object.layers().front()->lslices, (float)scale_(support_params.gap_xy), SUPPORT_SURFACES_OFFSET_PARAMETERS);
+        int expansion_layers = std::clamp(object.config().support_tree_base_layers.value, 1, 10);
+        for (int i = 0; i < expansion_layers; ++i) {
+            if (i >= int(base_layers.size())) break;
+            SupportGeneratorLayer *layer = base_layers[i];
+            if (layer == nullptr) continue;
+            
+            // Ensure we have a corresponding object layer for trimming.
+            if (i >= int(object.layers().size())) break;
+
+            Polygons &raft     = layer->polygons;
+            Polygons  trimming = offset(object.layers()[i]->lslices, (float)scale_(support_params.gap_xy), SUPPORT_SURFACES_OFFSET_PARAMETERS);
+            
             if (inflate_factor_1st_layer > SCALED_EPSILON) {
                 // Inflate in multiple steps to avoid leaking of the support 1st layer through object walls.
                 auto  nsteps = std::max(5, int(ceil(inflate_factor_1st_layer / support_params.first_layer_flow.scaled_width())));
                 float step   = inflate_factor_1st_layer / nsteps;
-                for (int i = 0; i < nsteps; ++ i)
+                for (int k = 0; k < nsteps; ++ k)
                     raft = diff(expand(raft, step), trimming);
             } else
                 raft = diff(raft, trimming);
-            if (! interface_polygons.empty())
-                columns_base->polygons = diff(columns_base->polygons, interface_polygons);
+            
+            // Trim the expanded base layer against other support types at the same layer to avoid overlap.
+            auto trim_against = [&layer](const SupportGeneratorLayersPtr &layers, int idx) {
+                if (idx < int(layers.size()) && layers[idx] != nullptr && !layers[idx]->polygons.empty())
+                    layer->polygons = diff(layer->polygons, layers[idx]->polygons);
+            };
+            trim_against(interface_layers, i);
+            trim_against(base_interface_layers, i);
+            trim_against(top_contacts, i);
+
+            if (i == 0) {
+                 if (! interface_polygons.empty())
+                     layer->polygons = diff(layer->polygons, interface_polygons);
+                 if (! brim.empty())
+                     layer->polygons = diff(layer->polygons, brim);
+            }
         }
+        
         if (! brim.empty()) {
-            if (columns_base)
-                columns_base->polygons = diff(columns_base->polygons, brim);
             if (contacts)
                 contacts->polygons = diff(contacts->polygons, brim);
             if (interfaces)
@@ -1505,6 +1527,7 @@ void generate_support_toolpaths(
 
     // Insert the raft base layers.
     auto n_raft_layers = std::min<size_t>(support_layers.size(), std::max(0, int(slicing_params.raft_layers()) - 1));
+    const size_t tree_support_base_layers = size_t(std::clamp(config.support_tree_base_layers.value, 1, 10));
 
     tbb::parallel_for(tbb::blocked_range<size_t>(0, n_raft_layers),
         [&support_layers, &raft_layers, &intermediate_layers, &config, &support_params, &slicing_params,
@@ -1616,7 +1639,7 @@ void generate_support_toolpaths(
 
     tbb::parallel_for(tbb::blocked_range<size_t>(n_raft_layers, support_layers.size()),
         [&config, &slicing_params, &support_params, &support_layers, &bottom_contacts, &top_contacts, &intermediate_layers, &interface_layers, &base_interface_layers, &layer_caches, &loop_interface_processor,
-            &bbox_object, &angles, n_raft_layers, link_max_length_factor]
+            &bbox_object, &angles, n_raft_layers, link_max_length_factor, tree_support_base_layers]
             (const tbb::blocked_range<size_t>& range) {
         // Indices of the 1st layer in their respective container at the support layer height.
         size_t idx_layer_bottom_contact   = size_t(-1);
@@ -1815,8 +1838,20 @@ void generate_support_toolpaths(
                     sheath  = true;
                     no_sort = true;
                 } else if (config.support_material_style == SupportMaterialStyle::smsOrganic) {
-                    tree_supports_generate_paths(base_layer.extrusions, base_layer.polygons_to_extrude(), flow, support_params);
-                    done = true;
+                    if (support_layer_id < n_raft_layers + tree_support_base_layers) {
+                        // Additional solid base layers for organic support.
+                        filler = filler_support.get();
+                        filler->angle = angles[support_layer_id % angles.size()];
+                        density = 1.f; // Solid
+                        // Use the standard support flow (already calculated above)
+                        filler->spacing = support_params.support_material_flow.spacing();
+                        filler->link_max_length = coord_t(scale_(filler->spacing * link_max_length_factor / density));
+                        sheath = true;
+                        no_sort = true;
+                    } else {
+                        tree_supports_generate_paths(base_layer.extrusions, base_layer.polygons_to_extrude(), flow, support_params);
+                        done = true;
+                    }
                 }
                 if (! done)
                     fill_expolygons_with_sheath_generate_paths(

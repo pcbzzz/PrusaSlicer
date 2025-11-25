@@ -1592,6 +1592,7 @@ void TabPrint::build()
         optgroup->append_single_option_line("support_tree_tip_diameter", path);
         optgroup->append_single_option_line("support_tree_branch_distance", path);
         optgroup->append_single_option_line("support_tree_top_rate", path);
+        optgroup->append_single_option_line("support_tree_base_layers", path);
 
     page = add_options_page(L("Speed"), "time");
         optgroup = page->new_optgroup(L("Speed for print moves"));
